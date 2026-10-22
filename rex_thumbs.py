@@ -9,6 +9,7 @@ the hints line up with the text, and swaps back when a hint is chosen.
 """
 
 import argparse
+import codecs
 import fcntl
 import json
 import os
@@ -238,28 +239,65 @@ def terminal_size(fd):
     return rows, columns
 
 
-def read_key(fd):
-    data = os.read(fd, 64).decode("utf-8", "ignore")
-    if data.startswith("\x1b") and len(data) > 1:
-        return {
-            "\x1b[A": "up",
-            "\x1b[B": "down",
-            "\x1b[C": "right",
-            "\x1b[D": "left",
-            "\x1bOA": "up",
-            "\x1bOB": "down",
-            "\x1bOC": "right",
-            "\x1bOD": "left",
-        }.get(data, "")
-    return {
-        "\x1b": "esc",
-        "\r": "enter",
-        "\n": "enter",
-        "\x7f": "backspace",
-        "\x08": "backspace",
-        "\x03": "esc",
-        " ": "space",
-    }.get(data, data[:1])
+SINGLE_KEYS = {
+    "\x1b": "esc",
+    "\r": "enter",
+    "\n": "enter",
+    "\x7f": "backspace",
+    "\x08": "backspace",
+    "\x03": "esc",
+    " ": "space",
+}
+CSI_KEYS = {"A": "up", "B": "down", "C": "right", "D": "left"}
+KITTY_KEYS = {27: "esc", 13: "enter", 127: "backspace", 8: "backspace", 32: "space"}
+CSI = re.compile(r"\x1b\[([0-9;:]*)([\x40-\x7e])|\x1bO([\x40-\x7e])")
+
+
+def kitty_key(params):
+    """A kitty keyboard protocol key (CSI code[:alternates];modifiers u) as a key name or character."""
+    fields = params.split(";")
+    code = int(fields[0].split(":")[0] or 0)
+    modifiers = int(fields[1].split(":")[0] or 1) - 1 if len(fields) > 1 and fields[1] else 0
+    if modifiers & 4 and code == ord("c"):
+        return "esc"
+    if code in KITTY_KEYS:
+        return KITTY_KEYS[code]
+    char = chr(code)
+    return char.upper() if modifiers & 1 else char
+
+
+def parse_keys(text):
+    """Every key in TEXT, in order; one read can hold several keys when typing fast."""
+    keys, index = [], 0
+    while index < len(text):
+        found = CSI.match(text, index)
+        if found:
+            params, final, ss3 = found.groups()
+            if ss3:
+                keys.append(CSI_KEYS.get(ss3, ""))
+            elif final == "u":
+                keys.append(kitty_key(params))
+            else:
+                keys.append(CSI_KEYS.get(final, ""))
+            index = found.end()
+            continue
+        keys.append(SINGLE_KEYS.get(text[index], text[index]))
+        index += 1
+    return [key for key in keys if key]
+
+
+class KeyReader:
+    def __init__(self):
+        self.pending = []
+        self.decoder = codecs.getincrementaldecoder("utf-8")("ignore")
+
+    def __call__(self, fd):
+        while not self.pending:
+            self.pending.extend(parse_keys(self.decoder.decode(os.read(fd, 1024))))
+        return self.pending.pop(0)
+
+
+read_key = KeyReader()
 
 
 class View:
