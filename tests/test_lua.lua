@@ -45,6 +45,7 @@ same(
     "session:a", "block:b",
   }
 )
+same(thumbs.command_for({ root = "/r", no_swap = true }, "s", "b"), { "python3", "/r/rex_thumbs.py", "s", "b" })
 same(thumbs.command_for({ root = "/r", regexp = "x" }, "s", "b"), { "python3", "/r/rex_thumbs.py", "--regexp", "x", "s", "b" })
 
 -- Running from a checkout, the module finds its own root.
