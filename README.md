@@ -120,11 +120,11 @@ Colors: `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `
 | `paste` | paste into the pane |
 | `copy-paste` | both |
 | `open` | `open` (macOS) or `xdg-open` |
-| anything else | run with `sh -c`. `{}` is replaced with the shell-quoted text, which is also on stdin and in `$THUMB`. `$REX_THUMBS_SESSION` and `$REX_THUMBS_BLOCK` name the pane. |
+| anything else | run with `sh -c`. The text is in `$THUMB` and on stdin, and `{}` is shorthand for `${THUMB}`, as in tmux-thumbs: the shell expands it as data and never runs the text. Write `"{}"` to pass it as one argument. `$REX_THUMBS_SESSION` and `$REX_THUMBS_BLOCK` name the pane. |
 
 ```lua
-command = "printf '%s\\n' {} >> ~/clips.txt",                 -- keep a log of copies
-upcase_command = 'rex split -b "$REX_THUMBS_BLOCK" -- nvim {}', -- open in Neovim beside the pane
+command = "printf '%s\\n' \"{}\" >> ~/clips.txt",                 -- keep a log of copies
+upcase_command = 'rex split -b "$REX_THUMBS_BLOCK" -- nvim "{}"', -- open in Neovim beside the pane
 ```
 
 ## How it works
