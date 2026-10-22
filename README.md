@@ -139,7 +139,7 @@ tmux-thumbs works the same way with `swap-pane`. For a moment the pane sits in t
 ## Troubleshooting
 
 - **Nothing happens.** There may be nothing to hint. Otherwise check `rex config check` and make sure `root` points at the checkout.
-- **A "thumbs" tab stays open.** The script failed before it could swap back; its error is in that tab. The usual cause is `python3` or `rex` missing from the pane's `PATH`; set `python` to an absolute path.
+- **A "thumbs" tab opens with an error.** The script brings its own tab into view when it fails (a bad `regexp`, a misspelled option, `rex` unreachable) and waits for a key. If nothing opens at all, `python3` may be missing from the pane's `PATH`; set `python` to an absolute path.
 - **The hints don't match what you were looking at.** thumbs hints the live screen, not a scrolled-back view of the history. Use the find bar or a picker such as [rextracto](https://github.com/sfrieds3/rextracto) for older output.
 
 ## Development
