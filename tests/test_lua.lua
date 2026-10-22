@@ -47,8 +47,14 @@ same(
 )
 same(thumbs.command_for({ root = "/r", regexp = "x" }, "s", "b"), { "python3", "/r/rex_thumbs.py", "--regexp", "x", "s", "b" })
 
--- Running from a checkout, the module finds its own root.
-same(thumbs.command_for({}, "s", "b"), { "python3", "./rex_thumbs.py", "s", "b" })
+-- Loaded by a relative path, the module can't know its root and asks for one.
+local ok, err = pcall(thumbs.command_for, {}, "s", "b")
+assert(not ok and err:find("pass root"), "a relative load needs root")
+
+-- Loaded by an absolute path, the module finds its own root.
+local checkout = assert(os.getenv("PWD"), "run from the repository root")
+local absolute = dofile(checkout .. "/lua/rex_thumbs.lua")
+same(absolute.command_for({}, "s", "b"), { "python3", checkout .. "/rex_thumbs.py", "s", "b" })
 
 thumbs.setup({ root = "/r" })
 local action = assert(defined.thumbs, "setup defines the thumbs action")
