@@ -139,11 +139,14 @@ def find_matches(lines, *, alphabet="qwerty", custom=(), reverse=False, unique=F
 
 
 def cell_width(text):
+    """Columns Rex draws TEXT in: one width per code point, without grapheme clustering."""
     width = 0
     for char in text:
         if unicodedata.combining(char) or unicodedata.category(char) in ("Mn", "Me", "Cf"):
             continue
-        width += 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+        # Regional indicators (flag halves) are East Asian "neutral", but Rex draws each one two columns wide.
+        wide = unicodedata.east_asian_width(char) in ("W", "F") or 0x1F1E6 <= ord(char) <= 0x1F1FF
+        width += 2 if wide else 1
     return width
 
 
@@ -187,12 +190,38 @@ def block_call(session, block, method, params=None):
     return rex("block", "call", "-s", session, "-b", block, method, json.dumps(params or {})) or {}
 
 
+CURSOR = re.compile(r"\x1b\[(\d+);(\d+)H$")
+
+
+def screen_lines(content, rows, cursor=None):
+    """The rows on screen, from Rex's text of the scrollback and screen.
+
+    The text leaves out blank rows below the last line with text, so after a clear-screen that keeps the
+    scrollback (Ctrl-L) the last ROWS lines start inside the scrollback. When the cursor sits at or past the
+    end of the last line, nothing is drawn below it, and the screen ends on the cursor's row. Otherwise (a
+    status line under a TUI's input, say) the screen is taken as full.
+    """
+    if content.endswith("\n"):
+        content = content[:-1]
+    lines = content.split("\n")
+    if not rows:
+        return lines
+    top = max(len(lines) - rows, 0)
+    if cursor:
+        row, column = cursor
+        if cell_width(lines[-1].rstrip()) <= column - 1:
+            top = max(len(lines) - row, 0)
+    return lines[top : top + rows]
+
+
 def capture(session, block):
     size = block_call(session, block, "size")
     content = block_call(session, block, "format", {"format": "text"}).get("content", "")
+    vt = block_call(session, block, "format", {"format": "vt", "extra_cursor": True}).get("content", "")
+    found = CURSOR.search(vt)
+    cursor = (int(found[1]), int(found[2])) if found else None
     rows, columns = size.get("rows") or 0, size.get("columns") or 0
-    lines = content.split("\n")[-rows:] if rows else content.split("\n")
-    return lines, rows, columns
+    return screen_lines(content, rows, cursor), rows, columns
 
 
 # Actions
