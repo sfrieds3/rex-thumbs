@@ -96,6 +96,11 @@ def hints_for(alphabet, count):
     return expansion[: max(count - len(expanded), 0)] + expanded
 
 
+def first_match(regex, line, offset):
+    """REGEX's first non-empty match from OFFSET; a pattern like \\d* matches empty before it matches text."""
+    return next((found for found in regex.finditer(line, offset) if found.end() > found.start()), None)
+
+
 def find_matches(lines, *, alphabet="qwerty", custom=(), reverse=False, unique=False):
     patterns = [(name, re.compile(regex)) for name, regex in EXCLUDE_PATTERNS]
     patterns += [("custom", re.compile(regex)) for regex in custom]
@@ -107,8 +112,8 @@ def find_matches(lines, *, alphabet="qwerty", custom=(), reverse=False, unique=F
         while offset <= len(line):
             first = None
             for name, regex in patterns:
-                found = regex.search(line, offset)
-                if found and found.end() > found.start() and (first is None or found.start() < first[1].start()):
+                found = first_match(regex, line, offset)
+                if found and (first is None or found.start() < first[1].start()):
                     first = (name, found)
             if first is None:
                 break
@@ -123,7 +128,8 @@ def find_matches(lines, *, alphabet="qwerty", custom=(), reverse=False, unique=F
                 else:
                     groups = [found.span()]
                 for start, end in groups:
-                    matches.append(Match(start, y, name, line[start:end]))
+                    if end > start:
+                        matches.append(Match(start, y, name, line[start:end]))
             offset = found.end()
 
     hints = hints_for(alphabet, len(matches))
