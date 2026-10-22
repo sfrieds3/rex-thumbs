@@ -401,6 +401,9 @@ def main(argv):
     options = parse_args(argv)
     session, target = options.session, options.block
     me = os.environ.get("REX_BLOCK")
+    if not me and not options.no_swap:
+        # Drawing in place would draw in the hidden tab and wait for keys that can't arrive.
+        raise RuntimeError("REX_BLOCK is not set; start rex-thumbs from its Rex action, or pass --no-swap")
     lines, rows, columns = capture(session, target)
     matches = find_matches(
         lines, alphabet=options.alphabet, custom=options.regexp, reverse=options.reverse, unique=options.unique

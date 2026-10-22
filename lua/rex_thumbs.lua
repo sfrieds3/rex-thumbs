@@ -20,8 +20,8 @@ local function command_for(opts, session_id, block_id)
   for _, name in ipairs(names) do
     local value = opts[name]
     local flag = "--" .. name:gsub("_", "-")
-    if name == "python" or name == "action" or name == "root" then
-      -- not script flags
+    if name == "python" or name == "action" or name == "root" or name == "no_swap" then
+      -- not script flags; the action always swaps, since its window is hidden
     elseif name == "regexp" then
       for _, regexp in ipairs(type(value) == "table" and value or { value }) do
         table.insert(command, flag)
