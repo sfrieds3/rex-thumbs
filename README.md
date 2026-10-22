@@ -20,7 +20,7 @@ press s to copy 3b7d0a2, or S to copy it and paste it at the prompt
 - It finds the same things tmux-thumbs does: markdown links, URLs, `git diff` paths, docker digests, paths, hex colors, UUIDs, IPFS hashes, git SHAs, IPv4 and IPv6 addresses, hex addresses, and numbers of four or more digits.
 - You can add your own patterns, and they're tried before the built-in ones.
 - Shift+hint copies and pastes. Space selects several matches. Everything has an option: the actions, alphabets, hint placement and colors.
-- Copying uses `pbcopy`, `wl-copy` or `xclip`, falling back to OSC 52. Pasting goes through Rex, so bracketed paste works.
+- Copying uses `pbcopy`, or `wl-copy` or `xclip` when `WAYLAND_DISPLAY` or `DISPLAY` is set, and falls back to OSC 52. Pasting goes through Rex, so bracketed paste works.
 
 ## Requirements
 
