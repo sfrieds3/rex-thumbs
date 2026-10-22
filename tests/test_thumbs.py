@@ -170,7 +170,9 @@ class CommandTests(unittest.TestCase):
     def test_shell_command(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "out")
-            thumbs.run_command(f"printf '%s|' {{}} \"$THUMB\" > {path}; cat >> {path}", "a b'c", "session:a", "block:b")
+            thumbs.run_command(
+                f'printf \'%s|\' "{{}}" "$THUMB" > {path}; cat >> {path}', "a b'c", "session:a", "block:b"
+            )
             with open(path) as handle:
                 self.assertEqual(handle.read(), "a b'c|a b'c|a b'c")
 

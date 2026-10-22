@@ -14,7 +14,6 @@ import json
 import os
 import re
 import select
-import shlex
 import shutil
 import signal
 import struct
@@ -226,10 +225,9 @@ def run_command(command, text, session, block):
             stderr=subprocess.DEVNULL,
         )
     elif command not in ("copy", "copy-paste"):
+        # Like tmux-thumbs, {} names the text in the environment, so the shell never parses the text itself.
         env = dict(os.environ, THUMB=text, REX_THUMBS_SESSION=session, REX_THUMBS_BLOCK=block)
-        subprocess.run(
-            ["sh", "-c", command.replace("{}", shlex.quote(text))], input=text, text=True, env=env, check=False
-        )
+        subprocess.run(["sh", "-c", command.replace("{}", "${THUMB}")], input=text, text=True, env=env, check=False)
 
 
 # Terminal UI
