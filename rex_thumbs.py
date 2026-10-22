@@ -198,6 +198,14 @@ def capture(session, block):
 # Actions
 
 
+OSC52_SETTLE = 0.1
+
+
+def run_clipboard(command, text, shell=False):
+    # wl-copy and xclip stay alive to serve the selection; their own session keeps the pane's hangup from killing them.
+    subprocess.run(command, shell=shell, input=text, text=True, check=False, start_new_session=True)
+
+
 def copy_text(text):
     for tool in (
         ["pbcopy"],
@@ -205,12 +213,15 @@ def copy_text(text):
         ["xclip", "-selection", "clipboard"] if os.environ.get("DISPLAY") else None,
     ):
         if tool and shutil.which(tool[0]):
-            subprocess.run(tool, input=text, text=True, check=False)
+            run_clipboard(tool, text)
             return
     import base64
 
     with open("/dev/tty", "w") as tty_out:
         tty_out.write("\x1b]52;c;" + base64.b64encode(text.encode()).decode() + "\a")
+        tty_out.flush()
+    # The pane closes when this script exits; give Rex a moment to read the sequence first.
+    time.sleep(OSC52_SETTLE)
 
 
 def run_command(command, text, session, block):
