@@ -397,6 +397,10 @@ def parse_args(argv):
     return parser.parse_args(argv)
 
 
+def exit_on_signal(signum, frame):
+    raise SystemExit(128 + signum)
+
+
 def main(argv):
     options = parse_args(argv)
     session, target = options.session, options.block
@@ -408,6 +412,8 @@ def main(argv):
     if not matches:
         return 0
 
+    # Closing the pane sends SIGHUP; turn it and SIGTERM into SystemExit so the swap back below still runs.
+    handlers = {signum: signal.signal(signum, exit_on_signal) for signum in (signal.SIGHUP, signal.SIGTERM)}
     swapped = False
     try:
         if not options.no_swap and me:
@@ -418,9 +424,15 @@ def main(argv):
             rows, columns = terminal_size(sys.stdin.fileno())
         chosen = present(View(lines, matches, options), rows, columns)
     finally:
-        if swapped:
-            api("session.swap_blocks", session_id=session, block_id=target, other_block_id=me)
-            api("session.focus_block", session_id=session, block_id=target)
+        for signum in handlers:
+            signal.signal(signum, signal.SIG_IGN)
+        try:
+            if swapped:
+                api("session.swap_blocks", session_id=session, block_id=target, other_block_id=me)
+                api("session.focus_block", session_id=session, block_id=target)
+        finally:
+            for signum, handler in handlers.items():
+                signal.signal(signum, handler)
 
     if not chosen:
         return 0
