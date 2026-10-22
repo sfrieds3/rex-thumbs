@@ -369,8 +369,14 @@ def present(view, rows, columns):
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
 
 
+class ArgumentParser(argparse.ArgumentParser):
+    # Report bad options as errors the pane shows, instead of printing usage and exiting.
+    def error(self, message):
+        raise ValueError(message)
+
+
 def parse_args(argv):
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("session")
     parser.add_argument("block")
     parser.add_argument("--alphabet", default="qwerty")
@@ -432,10 +438,31 @@ def main(argv):
     return 0
 
 
-if __name__ == "__main__":
+def show_error(message):
+    """The script starts in a hidden tab, so bring it into view and wait before it closes."""
+    print(f"rex-thumbs: {message}", file=sys.stderr)
+    session, block = os.environ.get("REX_SESSION"), os.environ.get("REX_BLOCK")
+    if session and block:
+        try:
+            api("session.focus_block", session_id=session, block_id=block)
+        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as exc:
+            print(f"rex-thumbs: can't bring this tab into view: {exc}", file=sys.stderr)
+    print("Press any key to close.", file=sys.stderr)
     try:
-        sys.exit(main(sys.argv[1:]))
-    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as exc:
-        print(f"rex-thumbs: {exc}", file=sys.stderr)
+        select.select([sys.stdin], [], [], 30)
+    except (OSError, ValueError):
         time.sleep(2)
-        sys.exit(1)
+
+
+def run(argv):
+    try:
+        return main(argv)
+    except re.error as exc:
+        show_error(f"invalid regexp {exc.pattern!r}: {exc}")
+    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as exc:
+        show_error(exc)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(run(sys.argv[1:]))
