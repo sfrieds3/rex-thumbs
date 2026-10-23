@@ -1,18 +1,13 @@
 -- Run from the repository root with lua5.1, luajit or nvim -l: lua tests/test_lua.lua
-local defined, windows = {}, {}
+local defined, blocks = {}, {}
 rex = {
   action = function(def)
     defined[def.name] = def
   end,
-  layout = {
-    block = function(block)
-      return { block = block }
-    end,
-  },
   session = {
-    new_window = function(args)
-      windows[#windows + 1] = args
-      return { block_ids = { "block:thumbs" } }
+    new_block = function(args)
+      blocks[#blocks + 1] = args
+      return { block_id = "block:thumbs" }
     end,
   },
 }
@@ -61,11 +56,11 @@ thumbs.setup({ root = "/r" })
 local action = assert(defined.thumbs, "setup defines the thumbs action")
 assert(not pcall(action.run, {}), "fails without a focused pane")
 action.run({ session_id = "session:a", block_id = "block:b" })
-local window = windows[#windows]
-assert(window.focus == false, "the script starts in a hidden window")
-same(window.layout.block.options.command, { "python3", "/r/rex_thumbs.py", "session:a", "block:b" })
+local block = blocks[#blocks]
+assert(block.flavor == "com.superlogical.terminal.shell", "the script starts in a detached shell block")
+same(block.options.command, { "python3", "/r/rex_thumbs.py", "session:a", "block:b" })
 
-rex.session.new_window = function()
+rex.session.new_block = function()
   return nil, "no session"
 end
 local ok, err = pcall(action.run, { session_id = "session:a", block_id = "block:b" })

@@ -4,8 +4,9 @@
 usage: rex_thumbs.py [options] SESSION BLOCK
 
 Run from the Lua action in lua/rex_thumbs.lua. It starts this script in a
-hidden window; the script captures BLOCK, swaps itself into BLOCK's place so
-the hints line up with the text, and swaps back when a hint is chosen.
+detached block, with no window or tab; the script captures BLOCK, takes
+BLOCK's place so the hints line up with the text, and puts BLOCK back when a
+hint is chosen.
 """
 
 import argparse
@@ -489,12 +490,47 @@ def exit_on_signal(signum, frame):
     raise SystemExit(128 + signum)
 
 
+def take_place(session, block, other):
+    """Put OTHER where BLOCK is in the layout, and detach BLOCK. Rex can't swap a detached block."""
+    api("session.move_block", session_id=session, block_id=other, anchor_block_id=block)
+    api("session.detach_block", session_id=session, block_id=block)
+
+
+def focused_block(session):
+    view = api("session.view", session_id=session)
+    for window in view.get("windows") or []:
+        if window.get("window_id") == view.get("active_window_id"):
+            return window.get("focused_block_id")
+    return None
+
+
+def is_placed(session, block):
+    view = api("session.view", session_id=session)
+    return any(
+        entry.get("block_id") == block
+        for window in view.get("windows") or []
+        for layer in window.get("layers") or []
+        for entry in layer.get("blocks") or []
+    )
+
+
+def put_back(session, target, me):
+    try:
+        take_place(session, me, target)
+    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
+        # This pane was closed under us. Don't leave BLOCK detached where nobody can see it.
+        anchor = focused_block(session)
+        if not anchor:
+            raise
+        api("session.move_block", session_id=session, block_id=target, anchor_block_id=anchor)
+
+
 def main(argv):
     options = parse_args(argv)
     session, target = options.session, options.block
     me = os.environ.get("REX_BLOCK")
     if not me and not options.no_swap:
-        # Drawing in place would draw in the hidden tab and wait for keys that can't arrive.
+        # Drawing in place would draw in the detached block and wait for keys that can't arrive.
         raise RuntimeError("REX_BLOCK is not set; start rex-thumbs from its Rex action, or pass --no-swap")
     lines, rows, columns = capture(session, target)
     matches = find_matches(
@@ -503,12 +539,12 @@ def main(argv):
     if not matches:
         return 0
 
-    # Closing the pane sends SIGHUP; turn it and SIGTERM into SystemExit so the swap back below still runs.
+    # Closing the pane sends SIGHUP; turn it and SIGTERM into SystemExit so putting BLOCK back still runs.
     handlers = {signum: signal.signal(signum, exit_on_signal) for signum in (signal.SIGHUP, signal.SIGTERM)}
     swapped = False
     try:
         if not options.no_swap and me:
-            api("session.swap_blocks", session_id=session, block_id=target, other_block_id=me)
+            take_place(session, target, me)
             swapped = True
             api("session.focus_block", session_id=session, block_id=me)
         else:
@@ -519,7 +555,7 @@ def main(argv):
             signal.signal(signum, signal.SIG_IGN)
         try:
             if swapped:
-                api("session.swap_blocks", session_id=session, block_id=target, other_block_id=me)
+                put_back(session, target, me)
                 api("session.focus_block", session_id=session, block_id=target)
         finally:
             for signum, handler in handlers.items():
@@ -536,14 +572,17 @@ def main(argv):
 
 
 def show_error(message):
-    """The script starts in a hidden tab, so bring it into view and wait before it closes."""
+    """The script starts detached, so place it beside the focused pane and wait before it closes."""
     print(f"rex-thumbs: {message}", file=sys.stderr)
     session, block = os.environ.get("REX_SESSION"), os.environ.get("REX_BLOCK")
     if session and block:
         try:
+            anchor = None if is_placed(session, block) else focused_block(session)
+            if anchor:
+                api("session.move_block", session_id=session, block_id=block, anchor_block_id=anchor)
             api("session.focus_block", session_id=session, block_id=block)
         except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as exc:
-            print(f"rex-thumbs: can't bring this tab into view: {exc}", file=sys.stderr)
+            print(f"rex-thumbs: can't bring this pane into view: {exc}", file=sys.stderr)
     print("Press any key to close.", file=sys.stderr)
     try:
         select.select([sys.stdin], [], [], 30)
