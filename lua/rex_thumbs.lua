@@ -21,7 +21,7 @@ local function command_for(opts, session_id, block_id)
     local value = opts[name]
     local flag = "--" .. name:gsub("_", "-")
     if name == "python" or name == "action" or name == "root" or name == "no_swap" then
-      -- not script flags; the action always swaps, since its window is hidden
+      -- not script flags; the action always swaps, since its block is detached
     elseif name == "regexp" then
       for _, regexp in ipairs(type(value) == "table" and value or { value }) do
         table.insert(command, flag)
@@ -51,14 +51,11 @@ function M.setup(opts)
       if not ctx.block_id then
         error("no focused pane", 0)
       end
-      -- The script swaps itself into the pane's place, so start it out of sight.
-      local _, err = rex.session.new_window({
-        focus = false,
-        window_label = "thumbs",
-        layout = rex.layout.block({
-          flavor = "com.superlogical.terminal.shell",
-          options = { command = command_for(opts, ctx.session_id, ctx.block_id) },
-        }),
+      -- The script takes the pane's place itself, so start it detached: no window, no tab.
+      local _, err = rex.session.new_block({
+        flavor = "com.superlogical.terminal.shell",
+        label = "thumbs",
+        options = { command = command_for(opts, ctx.session_id, ctx.block_id) },
       })
       if err ~= nil then
         error(err, 0)

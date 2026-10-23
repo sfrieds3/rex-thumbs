@@ -129,17 +129,18 @@ upcase_command = 'rex split -b "$REX_THUMBS_BLOCK" -- nvim "{}"', -- open in Neo
 
 ## How it works
 
-1. The `thumbs` action starts `rex_thumbs.py` in a new background tab.
+1. The `thumbs` action starts `rex_thumbs.py` in a detached block, which belongs to no window, so no tab appears.
 2. The script reads the pane's size and text over the `rex` CLI and finds the matches. If there are none, it exits.
-3. It swaps itself into the pane's place with `session.swap_blocks`, so it has the pane's exact size and position, and draws the text with hints.
-4. Once you choose (or cancel), it swaps back, focuses the pane again and runs the command. The background tab closes when the script exits.
+3. It takes the pane's place: `session.move_block` puts it beside the pane and `session.detach_block` takes the pane out, so the script gets the pane's exact size and position. Then it draws the text with hints.
+4. Once you choose (or cancel), it puts the pane back the same way, focuses it again and runs the command. The script's block closes when it exits.
 
-tmux-thumbs works the same way with `swap-pane`. For a moment the pane sits in the background tab at full size, so its program gets one resize. A floating layer over the pane would avoid that, but its text grid doesn't line up with a tiled pane's, so the hints would be off by a row.
+tmux-thumbs works the same way with `swap-pane`. Rex can't swap a detached block, so for a moment the pane and the script share the pane's space, and the pane's program gets one resize. A floating layer over the pane would avoid that, but its text grid doesn't line up with a tiled pane's, so the hints would be off by a row.
 
 ## Troubleshooting
 
 - **Nothing happens.** There may be nothing to hint. Otherwise check `rex config check` and make sure `root` points at the checkout.
-- **A "thumbs" tab opens with an error.** The script brings its own tab into view when it fails (a bad `regexp`, a misspelled option, `rex` unreachable) and waits for a key. If nothing opens at all, `python3` may be missing from the pane's `PATH`; set `python` to an absolute path.
+- **A "thumbs" pane opens with an error.** When the script fails (a bad `regexp`, a misspelled option, `rex` unreachable), it places itself beside the focused pane and waits for a key. If nothing opens at all, `python3` may be missing from the pane's `PATH`; set `python` to an absolute path.
+- **A pane disappeared.** If the script is killed outright (`kill -9`) while the hints are up, it can't put the pane back, and the pane is left running but detached. `rex api call session.list_blocks` lists it with `"placement": "detached"`; put it back beside another pane with `rex api call session.move_block '{"block_id": "<pane>", "anchor_block_id": "<other>"}'`.
 - **The hints don't match what you were looking at.** thumbs hints the live screen, not a scrolled-back view of the history. Use the find bar or a picker such as [rextracto](https://github.com/sfrieds3/rextracto) for older output.
 
 ## Development

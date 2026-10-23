@@ -9,7 +9,7 @@ import rex_thumbs as thumbs
 
 
 class MissingRexBlockTests(unittest.TestCase):
-    """Without REX_BLOCK the script fails instead of waiting in the hidden tab (#3)."""
+    """Without REX_BLOCK the script fails instead of waiting in the detached block (#3)."""
 
     def test_fails_before_capturing(self):
         env = {key: value for key, value in os.environ.items() if key != "REX_BLOCK"}
