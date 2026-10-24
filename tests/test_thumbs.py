@@ -197,26 +197,54 @@ class MainTests(unittest.TestCase):
         patches = [
             mock.patch.dict(os.environ, {"REX_BLOCK": "block:me"}),
             mock.patch.object(thumbs, "capture", return_value=(LINES, 2, 40)),
-            mock.patch.object(thumbs, "api", side_effect=lambda method, **params: self.calls.append((method, params))),
+            mock.patch.object(thumbs, "api", side_effect=self.api),
             mock.patch.object(thumbs, "run_command", side_effect=lambda *args: self.calls.append(("run",) + args)),
         ]
         for patch in patches:
             patch.start()
             self.addCleanup(patch.stop)
 
+    failing = None
+    view = {}
+
+    def api(self, method, **params):
+        self.calls.append((method, params))
+        if (method, params.get("anchor_block_id")) == self.failing:
+            raise RuntimeError("not found")
+        return self.view if method == "session.view" else {}
+
     def methods(self):
         return [call[0] for call in self.calls]
 
-    def test_swaps_in_and_back(self):
+    def moves(self):
+        """Each move as (block, anchor), and each detach or focus as its block."""
+        moves = []
+        for method, *args in self.calls:
+            if method == "session.move_block":
+                moves.append((args[0]["block_id"], args[0]["anchor_block_id"]))
+            elif method in ("session.detach_block", "session.focus_block"):
+                moves.append(args[0]["block_id"])
+        return moves
+
+    def test_takes_the_place_and_gives_it_back(self):
         with mock.patch.object(thumbs, "present", return_value=[("/tmp/one.txt", True)]):
             thumbs.main(["--upcase-command", "open", "session:a", "block:b"])
+        # Rex can't swap a detached block, so each move places one block beside the other and detaches the other.
         self.assertEqual(
-            self.methods(),
-            ["session.swap_blocks", "session.focus_block", "session.swap_blocks", "session.focus_block", "run"],
+            self.moves(),
+            [("block:me", "block:b"), "block:b", "block:me", ("block:b", "block:me"), "block:me", "block:b"],
         )
-        self.assertEqual(self.calls[1][1]["block_id"], "block:me")
-        self.assertEqual(self.calls[3][1]["block_id"], "block:b")
         self.assertEqual(self.calls[-1], ("run", "open", "/tmp/one.txt", "session:a", "block:b"))
+
+    def test_puts_the_pane_beside_focus_when_this_pane_is_gone(self):
+        self.failing = ("session.move_block", "block:me")
+        self.view = {
+            "active_window_id": "window:w",
+            "windows": [{"window_id": "window:w", "focused_block_id": "block:c"}],
+        }
+        with mock.patch.object(thumbs, "present", side_effect=SystemExit(129)), self.assertRaises(SystemExit):
+            thumbs.main(["session:a", "block:b"])
+        self.assertEqual(self.moves()[-2:], [("block:b", "block:c"), "block:b"])
 
     def test_multi_joins_texts(self):
         with mock.patch.object(thumbs, "present", return_value=[("one", False), ("two", False)]):
@@ -227,7 +255,15 @@ class MainTests(unittest.TestCase):
         with mock.patch.object(thumbs, "present", side_effect=OSError("tty")), self.assertRaises(OSError):
             thumbs.main(["session:a", "block:b"])
         self.assertEqual(
-            self.methods(), ["session.swap_blocks", "session.focus_block", "session.swap_blocks", "session.focus_block"]
+            self.methods(),
+            [
+                "session.move_block",
+                "session.detach_block",
+                "session.focus_block",
+                "session.move_block",
+                "session.detach_block",
+                "session.focus_block",
+            ],
         )
 
     def test_nothing_to_hint(self):

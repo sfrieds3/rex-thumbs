@@ -10,7 +10,7 @@ import rex_thumbs as thumbs
 
 
 class SignalTests(unittest.TestCase):
-    """SIGHUP and SIGTERM still swap the pane back (#4)."""
+    """SIGHUP and SIGTERM still put the pane back (#4)."""
 
     def setUp(self):
         self.calls = []
@@ -29,9 +29,8 @@ class SignalTests(unittest.TestCase):
         with kill, self.assertRaises(SystemExit) as raised:
             thumbs.main(["session:a", "block:b"])
         self.assertEqual(raised.exception.code, 128 + signum)
-        self.assertEqual(
-            self.calls, ["session.swap_blocks", "session.focus_block", "session.swap_blocks", "session.focus_block"]
-        )
+        place = ["session.move_block", "session.detach_block", "session.focus_block"]
+        self.assertEqual(self.calls, place + place)
         self.assertIs(signal.getsignal(signum), before, "main restores the previous handler")
 
     def test_sighup(self):
