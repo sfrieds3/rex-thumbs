@@ -18,7 +18,6 @@ class StartupErrorTests(unittest.TestCase):
         patches = [
             mock.patch.object(thumbs, "capture", return_value=(LINES, 1, 40)),
             mock.patch.object(thumbs, "api", side_effect=self.api),
-            mock.patch.object(thumbs, "terminal_size", return_value=(1, 40)),
             mock.patch.object(thumbs, "present", return_value=[]),
             mock.patch.object(thumbs.select, "select"),
         ]

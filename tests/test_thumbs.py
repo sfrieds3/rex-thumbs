@@ -110,7 +110,7 @@ def view(*argv, lines=LINES):
 
 def run_keys(target, keys):
     keys = list(keys)
-    with mock.patch.object(thumbs, "read_key", lambda fd: keys.pop(0)):
+    with mock.patch.object(thumbs, "read_key", lambda fd, idle=None: keys.pop(0)):
         return target.run(0, io.StringIO())
 
 
@@ -196,7 +196,6 @@ class MainTests(unittest.TestCase):
         self.calls = []
         patches = [
             mock.patch.object(thumbs, "capture", return_value=(LINES, 2, 40)),
-            mock.patch.object(thumbs, "terminal_size", return_value=(2, 40)),
             mock.patch.object(thumbs, "api", side_effect=lambda method, **params: self.calls.append((method, params))),
             mock.patch.object(thumbs, "run_command", side_effect=lambda *args: self.calls.append(("run",) + args)),
         ]
@@ -205,9 +204,8 @@ class MainTests(unittest.TestCase):
             self.addCleanup(patch.stop)
 
     def test_runs_the_command_without_moving_the_pane(self):
-        with mock.patch.object(thumbs, "present", return_value=[("/tmp/one.txt", True)]) as present:
+        with mock.patch.object(thumbs, "present", return_value=[("/tmp/one.txt", True)]):
             thumbs.main(["--upcase-command", "open", "session:a", "block:b"])
-        self.assertEqual(present.call_args.args[1:], (2, 40))
         self.assertEqual(self.calls, [("run", "open", "/tmp/one.txt", "session:a", "block:b")])
 
     def test_multi_joins_texts(self):

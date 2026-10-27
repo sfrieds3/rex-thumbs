@@ -10,14 +10,12 @@ hints in its own terminal.
 
 import argparse
 import codecs
-import fcntl
 import json
 import os
 import re
 import select
 import shutil
 import signal
-import struct
 import subprocess
 import sys
 import termios
@@ -280,11 +278,6 @@ def run_command(command, text, session, block):
 # Terminal UI
 
 
-def terminal_size(fd):
-    rows, columns, _, _ = struct.unpack("HHHH", fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8))
-    return rows, columns
-
-
 SINGLE_KEYS = {
     "\x1b": "esc",
     "\r": "enter",
@@ -337,8 +330,12 @@ class KeyReader:
         self.pending = []
         self.decoder = codecs.getincrementaldecoder("utf-8")("ignore")
 
-    def __call__(self, fd):
+    def __call__(self, fd, idle=None):
+        """The next key. While none is waiting, call IDLE every few hundredths of a second."""
         while not self.pending:
+            if idle and not select.select([fd], [], [], 0.05)[0]:
+                idle()
+                continue
             self.pending.extend(parse_keys(self.decoder.decode(os.read(fd, 1024))))
         return self.pending.pop(0)
 
@@ -352,6 +349,7 @@ class View:
         self.multi = options.multi
         self.selected = 0
         self.chosen = []  # (text, upcase)
+        self.resized = False
 
     def render(self, typed, out):
         options = self.options
@@ -391,8 +389,15 @@ class View:
         longest = max(len(match.hint or "") for match in self.matches)
         typed = ""
         self.render(typed, out)
+
+        # Rex can size the layer's terminal after the script starts, which wipes the screen; draw it again.
+        def redraw_after_resize():
+            if self.resized:
+                self.resized = False
+                self.render(typed, out)
+
         while True:
-            key = read_key(fd)
+            key = read_key(fd, redraw_after_resize)
             if key == "esc":
                 if self.multi and typed:
                     typed = ""
@@ -427,23 +432,14 @@ class View:
             self.render(typed, out)
 
 
-def wait_for_size(fd, rows, columns, timeout=1.0):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if terminal_size(fd) == (rows, columns):
-            return
-        select.select([], [], [], 0.02)
-
-
-def present(view, rows, columns):
+def present(view):
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
     out = sys.stdout
     try:
         tty.setraw(fd)
         out.write("\x1b[?1049h")
-        wait_for_size(fd, rows, columns)
-        signal.signal(signal.SIGWINCH, lambda *_: None)
+        signal.signal(signal.SIGWINCH, lambda *_: setattr(view, "resized", True))
         return view.run(fd, out)
     finally:
         out.write("\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l")
@@ -494,8 +490,7 @@ def main(argv):
     if not matches:
         return 0
 
-    rows, columns = terminal_size(sys.stdin.fileno())
-    chosen = present(View(lines, matches, options), rows, columns)
+    chosen = present(View(lines, matches, options))
     if not chosen:
         return 0
     if len(chosen) > 1:
