@@ -20,8 +20,8 @@ local function command_for(opts, session_id, block_id)
   for _, name in ipairs(names) do
     local value = opts[name]
     local flag = "--" .. name:gsub("_", "-")
-    if name == "python" or name == "action" or name == "root" then
-      -- not script flags
+    if name == "python" or name == "action" or name == "root" or name == "no_swap" then
+      -- not script flags; the action always swaps, since its block is detached
     elseif name == "regexp" then
       for _, regexp in ipairs(type(value) == "table" and value or { value }) do
         table.insert(command, flag)
@@ -40,59 +40,6 @@ local function command_for(opts, session_id, block_id)
 end
 M.command_for = command_for
 
-local function find(node, block, box)
-  if type(node) ~= "table" then
-    return
-  end
-  if node.block_id == block then
-    return node, box
-  end
-  local split = node.split
-  if type(split) == "table" then
-    local x, y, w, h = box[1], box[2], box[3], box[4]
-    local ratio = split.ratio or 0.5
-    local before, after
-    if split.direction == "horizontal" then
-      before, after = { x, y, w * ratio, h }, { x + w * ratio, y, w * (1 - ratio), h }
-    else
-      before, after = { x, y, w, h * ratio }, { x, y + h * ratio, w, h * (1 - ratio) }
-    end
-    local leaf, found = find(split.before, block, before)
-    if leaf then
-      return leaf, found
-    end
-    return find(split.after, block, after)
-  end
-end
-
--- The pane's place in its window, as the fractions new_layer takes: x, y, width, height. Rex's own rects
--- (which count gutters) win over split ratios when the layout has them.
-local function pane_bounds(session_id, block_id)
-  local view = rex.call("session.view", { session_id = session_id })
-  for _, window in ipairs(view and view.windows or {}) do
-    if window.zoomed_block_id == block_id then
-      return { 0, 0, 1, 1 }
-    end
-    for _, layer in ipairs(window.layers or {}) do
-      local root = layer.layout
-      local leaf, box = find(root, block_id, { 0, 0, 1, 1 })
-      if leaf then
-        local outer, rect = type(root) == "table" and root.rect, leaf.rect
-        if type(outer) == "table" and type(rect) == "table" and outer[3] > 0 and outer[4] > 0 then
-          box = {
-            (rect[1] - outer[1]) / outer[3],
-            (rect[2] - outer[2]) / outer[4],
-            rect[3] / outer[3],
-            rect[4] / outer[4],
-          }
-        end
-        return box
-      end
-    end
-  end
-end
-M.pane_bounds = pane_bounds
-
 -- Defines the action (default name "thumbs"); bind it like any other action.
 function M.setup(opts)
   opts = opts or {}
@@ -104,14 +51,11 @@ function M.setup(opts)
       if not ctx.block_id then
         error("no focused pane", 0)
       end
-      -- A floating layer over the pane: the pane keeps its size and place, and the layer hides it.
-      local _, err = rex.session.new_layer({
-        bounds = pane_bounds(ctx.session_id, ctx.block_id) or { 0, 0, 1, 1 },
-        focus = true,
-        layout = rex.layout.block({
-          flavor = "com.superlogical.terminal.shell",
-          options = { command = command_for(opts, ctx.session_id, ctx.block_id) },
-        }),
+      -- The script takes the pane's place itself, so start it detached: no window, no tab.
+      local _, err = rex.session.new_block({
+        flavor = "com.superlogical.terminal.shell",
+        label = "thumbs",
+        options = { command = command_for(opts, ctx.session_id, ctx.block_id) },
       })
       if err ~= nil then
         error(err, 0)
