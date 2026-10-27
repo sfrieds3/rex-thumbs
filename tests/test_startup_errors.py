@@ -8,17 +8,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import rex_thumbs as thumbs
 
 LINES = ["see /tmp/one.txt"]
-# The script starts detached; show_error places it beside the focused pane.
-VIEW = {"active_window_id": "window:w", "windows": [{"window_id": "window:w", "focused_block_id": "block:b"}]}
 
 
 class StartupErrorTests(unittest.TestCase):
-    """Errors are shown in view instead of vanishing with the detached block (#2)."""
+    """Errors stay on screen instead of vanishing with the layer (#2)."""
 
     def setUp(self):
         self.calls = []
         patches = [
-            mock.patch.dict(os.environ, {"REX_SESSION": "session:a", "REX_BLOCK": "block:me"}),
             mock.patch.object(thumbs, "capture", return_value=(LINES, 1, 40)),
             mock.patch.object(thumbs, "api", side_effect=self.api),
             mock.patch.object(thumbs, "present", return_value=[]),
@@ -30,7 +27,7 @@ class StartupErrorTests(unittest.TestCase):
 
     def api(self, method, **params):
         self.calls.append((method, params))
-        return VIEW if method == "session.view" else {}
+        return {}
 
     def run_thumbs(self, *argv):
         with mock.patch("sys.stderr") as stderr:
@@ -41,16 +38,8 @@ class StartupErrorTests(unittest.TestCase):
         code, output = self.run_thumbs("--regexp", "(")
         self.assertEqual(code, 1)
         self.assertIn("invalid regexp '('", output)
-        self.assertEqual(
-            [call for call in self.calls if call[0] != "session.view"],
-            [
-                (
-                    "session.move_block",
-                    {"session_id": "session:a", "block_id": "block:me", "anchor_block_id": "block:b"},
-                ),
-                ("session.focus_block", {"session_id": "session:a", "block_id": "block:me"}),
-            ],
-        )
+        self.assertIn("Press any key", output)
+        self.assertEqual(self.calls, [], "the layer is already in view")
 
     def test_unknown_option_is_shown(self):
         code, output = self.run_thumbs("--hint-postion", "left")

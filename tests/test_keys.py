@@ -56,9 +56,53 @@ class KeyReaderTests(unittest.TestCase):
         reader = thumbs.KeyReader()
         with (
             mock.patch.object(thumbs.os, "read", side_effect=lambda fd, size: chunks.pop(0)),
+            mock.patch.object(thumbs.select, "select", side_effect=lambda r, w, x, timeout: (r, w, x)),
             mock.patch.object(thumbs, "read_key", reader),
         ):
             self.assertEqual(view.run(0, io.StringIO()), [(target.text, False)])
+
+
+class ResizeTests(unittest.TestCase):
+    """Rex can size the layer's terminal after the first draw, which wipes it; a resize draws again."""
+
+    def setUp(self):
+        self.read_fd, self.write_fd = os.pipe()
+        self.addCleanup(os.close, self.read_fd)
+        self.addCleanup(os.close, self.write_fd)
+
+    def test_reader_idles_until_a_key_arrives(self):
+        reader, idles = thumbs.KeyReader(), []
+
+        def idle():
+            idles.append(True)
+            if len(idles) == 2:
+                os.write(self.write_fd, b"a")
+
+        self.assertEqual(reader(self.read_fd, idle), "a")
+        self.assertEqual(len(idles), 2)
+
+    def test_resize_redraws(self):
+        lines = ["see /tmp/one.txt"]
+        options = thumbs.parse_args(["session:a", "block:b"])
+        view = thumbs.View(lines, thumbs.find_matches(lines), options)
+        draws = []
+        render = view.render
+
+        def counting_render(typed, out):
+            draws.append(typed)
+            render(typed, out)
+            if len(draws) == 1:
+                view.resized = True  # as the SIGWINCH handler does
+            else:
+                os.write(self.write_fd, b"\x1b")
+
+        with (
+            mock.patch.object(view, "render", counting_render),
+            mock.patch.object(thumbs, "read_key", thumbs.KeyReader()),
+        ):
+            self.assertEqual(view.run(self.read_fd, io.StringIO()), [])
+        self.assertEqual(len(draws), 2)
+        self.assertFalse(view.resized)
 
 
 if __name__ == "__main__":

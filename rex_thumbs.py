@@ -3,22 +3,19 @@
 
 usage: rex_thumbs.py [options] SESSION BLOCK
 
-Run from the Lua action in lua/rex_thumbs.lua. It starts this script in a
-detached block, with no window or tab; the script captures BLOCK, takes
-BLOCK's place so the hints line up with the text, and puts BLOCK back when a
-hint is chosen.
+Run from the Lua action in lua/rex_thumbs.lua, which opens this script in a
+floating layer over BLOCK; the script captures BLOCK and draws its text with
+hints in its own terminal.
 """
 
 import argparse
 import codecs
-import fcntl
 import json
 import os
 import re
 import select
 import shutil
 import signal
-import struct
 import subprocess
 import sys
 import termios
@@ -281,11 +278,6 @@ def run_command(command, text, session, block):
 # Terminal UI
 
 
-def terminal_size(fd):
-    rows, columns, _, _ = struct.unpack("HHHH", fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\0" * 8))
-    return rows, columns
-
-
 SINGLE_KEYS = {
     "\x1b": "esc",
     "\r": "enter",
@@ -338,8 +330,12 @@ class KeyReader:
         self.pending = []
         self.decoder = codecs.getincrementaldecoder("utf-8")("ignore")
 
-    def __call__(self, fd):
+    def __call__(self, fd, idle=None):
+        """The next key. While none is waiting, call IDLE every few hundredths of a second."""
         while not self.pending:
+            if idle and not select.select([fd], [], [], 0.05)[0]:
+                idle()
+                continue
             self.pending.extend(parse_keys(self.decoder.decode(os.read(fd, 1024))))
         return self.pending.pop(0)
 
@@ -353,6 +349,7 @@ class View:
         self.multi = options.multi
         self.selected = 0
         self.chosen = []  # (text, upcase)
+        self.resized = False
 
     def render(self, typed, out):
         options = self.options
@@ -392,8 +389,15 @@ class View:
         longest = max(len(match.hint or "") for match in self.matches)
         typed = ""
         self.render(typed, out)
+
+        # Rex can size the layer's terminal after the script starts, which wipes the screen; draw it again.
+        def redraw_after_resize():
+            if self.resized:
+                self.resized = False
+                self.render(typed, out)
+
         while True:
-            key = read_key(fd)
+            key = read_key(fd, redraw_after_resize)
             if key == "esc":
                 if self.multi and typed:
                     typed = ""
@@ -428,23 +432,14 @@ class View:
             self.render(typed, out)
 
 
-def wait_for_size(fd, rows, columns, timeout=1.0):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if terminal_size(fd) == (rows, columns):
-            return
-        select.select([], [], [], 0.02)
-
-
-def present(view, rows, columns):
+def present(view):
     fd = sys.stdin.fileno()
     saved = termios.tcgetattr(fd)
     out = sys.stdout
     try:
         tty.setraw(fd)
         out.write("\x1b[?1049h")
-        wait_for_size(fd, rows, columns)
-        signal.signal(signal.SIGWINCH, lambda *_: None)
+        signal.signal(signal.SIGWINCH, lambda *_: setattr(view, "resized", True))
         return view.run(fd, out)
     finally:
         out.write("\x1b[0m\x1b[?7h\x1b[?25h\x1b[?1049l")
@@ -482,85 +477,20 @@ def parse_args(argv):
     ):
         parser.add_argument(f"--{name}fg-color", default=fg)
         parser.add_argument(f"--{name}bg-color", default=bg)
-    parser.add_argument("--no-swap", action="store_true", help="draw in this terminal instead of over BLOCK")
     return parser.parse_args(argv)
-
-
-def exit_on_signal(signum, frame):
-    raise SystemExit(128 + signum)
-
-
-def take_place(session, block, other):
-    """Put OTHER where BLOCK is in the layout, and detach BLOCK. Rex can't swap a detached block."""
-    api("session.move_block", session_id=session, block_id=other, anchor_block_id=block)
-    api("session.detach_block", session_id=session, block_id=block)
-
-
-def focused_block(session):
-    view = api("session.view", session_id=session)
-    for window in view.get("windows") or []:
-        if window.get("window_id") == view.get("active_window_id"):
-            return window.get("focused_block_id")
-    return None
-
-
-def is_placed(session, block):
-    view = api("session.view", session_id=session)
-    return any(
-        entry.get("block_id") == block
-        for window in view.get("windows") or []
-        for layer in window.get("layers") or []
-        for entry in layer.get("blocks") or []
-    )
-
-
-def put_back(session, target, me):
-    try:
-        take_place(session, me, target)
-    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError):
-        # This pane was closed under us. Don't leave BLOCK detached where nobody can see it.
-        anchor = focused_block(session)
-        if not anchor:
-            raise
-        api("session.move_block", session_id=session, block_id=target, anchor_block_id=anchor)
 
 
 def main(argv):
     options = parse_args(argv)
     session, target = options.session, options.block
-    me = os.environ.get("REX_BLOCK")
-    if not me and not options.no_swap:
-        # Drawing in place would draw in the detached block and wait for keys that can't arrive.
-        raise RuntimeError("REX_BLOCK is not set; start rex-thumbs from its Rex action, or pass --no-swap")
-    lines, rows, columns = capture(session, target)
+    lines, _, _ = capture(session, target)
     matches = find_matches(
         lines, alphabet=options.alphabet, custom=options.regexp, reverse=options.reverse, unique=options.unique
     )
     if not matches:
         return 0
 
-    # Closing the pane sends SIGHUP; turn it and SIGTERM into SystemExit so putting BLOCK back still runs.
-    handlers = {signum: signal.signal(signum, exit_on_signal) for signum in (signal.SIGHUP, signal.SIGTERM)}
-    swapped = False
-    try:
-        if not options.no_swap and me:
-            take_place(session, target, me)
-            swapped = True
-            api("session.focus_block", session_id=session, block_id=me)
-        else:
-            rows, columns = terminal_size(sys.stdin.fileno())
-        chosen = present(View(lines, matches, options), rows, columns)
-    finally:
-        for signum in handlers:
-            signal.signal(signum, signal.SIG_IGN)
-        try:
-            if swapped:
-                put_back(session, target, me)
-                api("session.focus_block", session_id=session, block_id=target)
-        finally:
-            for signum, handler in handlers.items():
-                signal.signal(signum, handler)
-
+    chosen = present(View(lines, matches, options))
     if not chosen:
         return 0
     if len(chosen) > 1:
@@ -572,17 +502,8 @@ def main(argv):
 
 
 def show_error(message):
-    """The script starts detached, so place it beside the focused pane and wait before it closes."""
+    """Keep the layer open long enough to read the error."""
     print(f"rex-thumbs: {message}", file=sys.stderr)
-    session, block = os.environ.get("REX_SESSION"), os.environ.get("REX_BLOCK")
-    if session and block:
-        try:
-            anchor = None if is_placed(session, block) else focused_block(session)
-            if anchor:
-                api("session.move_block", session_id=session, block_id=block, anchor_block_id=anchor)
-            api("session.focus_block", session_id=session, block_id=block)
-        except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as exc:
-            print(f"rex-thumbs: can't bring this pane into view: {exc}", file=sys.stderr)
     print("Press any key to close.", file=sys.stderr)
     try:
         select.select([sys.stdin], [], [], 30)
